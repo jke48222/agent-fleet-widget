@@ -345,15 +345,17 @@ const resolve = (key, props, parse, mock) => {
 };
 // --- End inlined design system ---
 
-// agent-fleet — every coding-agent session on this Mac at a glance: what each
-// one is doing, which ones are waiting on you, how much context each carries,
-// and today's token totals. It reads the logs Claude Code and Codex already
-// write (~/.claude/projects, ~/.codex/sessions). Read-only; nothing is sent
-// anywhere. The helper also mirrors its JSON to ~/.config/widgetsuite/fleet.json
-// so the window-pet widget can react to the same sessions.
+// agent-fleet — every coding-agent session on this Mac, shown the way an
+// airport shows flights: a split-flap departures board. Each row is a session;
+// the TIME column is its last activity, STATUS flips between RUNNING, NEEDS
+// YOU, PAUSED, and IDLE, and the characters flutter through the drum when a
+// value changes, the way a Solari board does. The data helper is embedded
+// below; it reads the logs Claude Code and Codex already write (read-only) and
+// mirrors its summary to ~/.config/widgetsuite/fleet.json for the window-pet.
 
 const POS = [640, 40];
 const KEY = "fleet";
+const FONTS = "agent-fleet.widget/fonts";
 
 export const command = String.raw`python3 - <<'PY'
 #!/usr/bin/env python3
@@ -533,102 +535,126 @@ PY`;
 export const refreshFrequency = 1000 * 10;
 
 const parse = (out) => { const j = JSON.parse(out); return j && Array.isArray(j.sessions) ? j : null; };
-
 const MOCK = { now: 0, sessions: [
-  { agent: "claude", title: "Add badges, license, and hero image to every README", project: "github", branch: "main", model: "Fable 5.1", status: "running", age: 12, tool: "Bash", ctx: 143000, window: 200000, turns: 41 },
-  { agent: "claude", title: "Fix the flaky worktree test", project: "relay-oms", branch: "fix/worktree", model: "Opus 5", status: "needs you", age: 340, tool: "", ctx: 61000, window: 200000, turns: 9 },
-  { agent: "codex", title: "Migrate the KUL site to Next 16", project: "KUL-Enterprises-Website", branch: "main", model: "Codex", status: "paused", age: 2400, tool: "", ctx: 0, window: 0, turns: 0 },
-], totals: { in: 2140000, out: 96000, sessions: 3, running: 1, needs: 1 } };
+  { agent: "claude", id: "m1", title: "Add badges, license, and hero image to every README", project: "github", branch: "main", model: "Fable 5.1", status: "running", age: 12, tool: "Bash", ctx: 143000, window: 1000000, turns: 41 },
+  { agent: "claude", id: "m2", title: "Fix the flaky worktree test", project: "relay-oms", branch: "fix/worktree", model: "Opus 5", status: "needs you", age: 340, tool: "", ctx: 61000, window: 1000000, turns: 9 },
+  { agent: "codex", id: "m3", title: "Migrate the KUL site to Next 16", project: "KUL-Enterprises-Website", branch: "main", model: "Codex", status: "paused", age: 2400, tool: "", ctx: 0, window: 0, turns: 0 },
+  { agent: "claude", id: "m4", title: "Album art matrix render daemon", project: "album-art-matrix", branch: "main", model: "Opus 5", status: "idle", age: 19000, tool: "", ctx: 210000, window: 1000000, turns: 88 },
+], totals: { in: 2140000, out: 96000, sessions: 4, running: 1, needs: 1 } };
 
-const fmtK = (n) => n >= 1e6 ? (n / 1e6).toFixed(1) + "M" : n >= 1e3 ? Math.round(n / 1e3) + "k" : String(n || 0);
-const ago = (s) => s < 60 ? `${s}s` : s < 3600 ? `${Math.floor(s / 60)}m` : `${Math.floor(s / 3600)}h ${Math.floor((s % 3600) / 60)}m`;
-const STATUS = {
-  "needs you": { tint: T.tintOrange, label: "needs you", slug: "needs" },
-  running:     { tint: T.tintGreen,  label: "running",   slug: "running" },
-  paused:      { tint: T.onDarkMute, label: "paused",    slug: "paused" },
-  idle:        { tint: T.onDarkMute, label: "idle",      slug: "idle" },
-};
-const headline = (t) => {
-  if (!t || !t.sessions) return "No agents running.";
-  if (t.needs) return t.needs === 1 ? "One agent is waiting on you." : `${t.needs} agents are waiting on you.`;
-  if (t.running) return t.running === 1 ? "One agent working. Nothing needs you." : `${t.running} agents working. Nothing needs you.`;
-  return "All quiet. Every session is paused.";
-};
+const fmtK = (n) => n >= 1e6 ? (n / 1e6).toFixed(1) + "M" : n >= 1e3 ? Math.round(n / 1e3) + "K" : String(n || 0);
+const COLS = [["time", 5], ["agent", 6], ["project", 10], ["task", 15], ["status", 9]];
+const STATUS = { "needs you": { text: "NEEDS YOU", color: "#F5B52A" }, running: { text: "RUNNING", color: "#43E07E" }, paused: { text: "PAUSED", color: "#9A9A96" }, idle: { text: "IDLE", color: "#5F5F5C" } };
+const DRUM = " ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789:-./&";
+const clean = (s, n) => { const t = String(s || "").toUpperCase().normalize("NFD").replace(/[̀-ͯ]/g, "").replace(/[^A-Z0-9:\-./& ]/g, " ").replace(/\s+/g, " ").trim(); return (t.length > n ? t.slice(0, n) : t).padEnd(n, " "); };
+const hhmm = (age, now) => { const d = new Date(((now || Date.now() / 1000) - (age || 0)) * 1000); return `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`; };
 
-const W = 440, H = 372, ROWS = 5;
+const ROWS = 8, FW = 10, FH = 19, GAP = 2;
+const W = 620, H = 306;
 
 export const className = card("dark", W, H, ...POS) + `
-  padding: 16px 18px 12px;
-  display: flex; flex-direction: column;
-
-  .cap { ${caption(T.onDarkMute)} display:flex; justify-content:space-between; }
-  .cap b { font-weight: 500; color: ${T.onDarkDim}; }
-  .head { font-family:${serif}; font-style:italic; font-size:22px; line-height:1.15; margin: 6px 0 10px; color:${T.onDark}; }
-  .head em { font-style:italic; color:${T.tintOrange}; }
-
-  .rows { flex:1; display:flex; flex-direction:column; min-height:0; }
-  .row { display:flex; align-items:center; gap: 10px; padding: 5px 0; border-top: 1px solid rgba(255,255,255,0.07); min-height: 34px; }
-  .row:first-child { border-top: 0; }
-  .dot { flex:none; width:8px; height:8px; border-radius:50%; background: var(--tint); box-shadow: 0 0 0 3px color-mix(in srgb, var(--tint) 18%, transparent); }
-  .row.st-running .dot { animation: fl-pulse 1.6s ease-in-out infinite; }
-  .row.st-paused .dot, .row.st-idle .dot { opacity: 0.45; box-shadow: none; }
-  @keyframes fl-pulse { 0%,100% { box-shadow: 0 0 0 3px color-mix(in srgb, var(--tint) 18%, transparent); } 50% { box-shadow: 0 0 0 6px color-mix(in srgb, var(--tint) 8%, transparent); } }
-  @media (prefers-reduced-motion: reduce) { .row.st-running .dot { animation: none; } }
-  .main { flex:1; min-width:0; }
-  .title { font-size: 12.5px; font-weight: 500; color: ${T.onDark}; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
-  .row.st-paused .title, .row.st-idle .title { color: ${T.onDarkDim}; font-weight: 400; }
-  .meta { margin-top: 2px; font-family:${mono}; font-size: 8.5px; letter-spacing: 0.6px; color: ${T.onDarkMute}; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
-  .meta span { color: ${T.onDarkDim}; }
-  .ctx { flex:none; width: 58px; text-align:right; font-family:${mono}; font-size: 9px; color:${T.onDarkDim}; }
-  .ctx i { display:block; height: 3px; border-radius: 2px; background: rgba(255,255,255,0.10); margin-bottom: 4px; overflow:hidden; }
-  .ctx i b { display:block; height:100%; background: var(--tint); border-radius: 2px; }
-  .badge { flex:none; font-family:${mono}; font-size: 8px; letter-spacing: 1.2px; text-transform: uppercase; padding: 4px 7px; border-radius: 6px;
-           color: var(--tint); background: color-mix(in srgb, var(--tint) 16%, transparent); }
-  .row.st-paused .badge, .row.st-idle .badge { color:${T.onDarkMute}; background: rgba(255,255,255,0.06); }
-  .more { font-family:${mono}; font-size: 8.5px; letter-spacing: 1px; text-transform: uppercase; color: ${T.onDarkMute}; padding: 6px 0 0 18px; }
-
-  .foot { display:flex; justify-content:space-between; align-items:baseline; margin-top: 8px; padding-top: 8px; border-top: 1px solid rgba(255,255,255,0.07);
-          font-family:${mono}; font-size: 8.5px; letter-spacing: 1.2px; text-transform: uppercase; color: ${T.onDarkMute}; }
-  .foot b { font-weight: 500; color: ${T.onDarkDim}; }
-  .mock { color: ${T.tintOrange}; }
+  @font-face { font-family: "Barlow Condensed"; src: url("${FONTS}/BarlowCondensed-600.woff2") format("woff2"); font-weight: 600; }
+  @font-face { font-family: "Barlow Condensed"; src: url("${FONTS}/BarlowCondensed-700.woff2") format("woff2"); font-weight: 700; }
+  --cond: "Barlow Condensed", "Arial Narrow", sans-serif; --yellow: #F2C231; --ivory: #F1EDE3;
+  padding: 0; border-radius: 12px; backdrop-filter: none; overflow: hidden;
+  background: linear-gradient(180deg, #4A4A4A 0%, #2E2E2E 12%, #262626 88%, #171717 100%);
+  box-shadow: 0 30px 60px rgba(0,0,0,0.55), inset 0 1px 0 rgba(255,255,255,0.18), 0 0 0 1px #0a0a0a;
+  font-family: var(--cond); user-select:none; -webkit-user-select:none;
+  .ws-drag { top: 6px; left: 6px; }
+  .screw { position:absolute; width: 7px; height: 7px; border-radius:50%; background: radial-gradient(circle at 40% 35%, #8a8a8a, #3a3a3a 70%); box-shadow: inset 0 0 0 1px #111; }
+  .screw::after { content:""; position:absolute; left: 1px; right: 1px; top: 3px; height: 1px; background: #111; transform: rotate(35deg); }
+  .board { position:absolute; inset: 9px; border-radius: 6px; background: #0B0B0B; box-shadow: inset 0 0 0 1px #000, inset 0 2px 14px rgba(0,0,0,0.9); padding: 10px 14px 9px; display:flex; flex-direction:column; }
+  .hdr { display:flex; align-items:baseline; justify-content:space-between; margin-bottom: 6px; }
+  .hdr .t { font: 700 15px/1 var(--cond); letter-spacing: 3px; color: var(--yellow); text-transform:uppercase; }
+  .hdr .t small { font-weight: 600; font-size: 9px; letter-spacing: 2px; color: #8f8368; margin-left: 10px; }
+  .cols { display:flex; gap: 10px; margin-bottom: 4px; padding-left: 1px; }
+  .cols span { font: 600 8.5px/1 var(--cond); letter-spacing: 2px; color: var(--yellow); text-transform:uppercase; opacity: 0.85; }
+  .row { display:flex; gap: 10px; margin-bottom: 5px; }
+  .cell { display:flex; gap: ${GAP}px; }
+  .flap { position:relative; width: ${FW}px; height: ${FH}px; perspective: 120px; }
+  .flap .half { position:absolute; left:0; right:0; overflow:hidden; background: linear-gradient(180deg, #303030 0%, #232323 100%); border-radius: 2px 2px 0 0; }
+  .flap .half span { position:absolute; left:0; width:100%; text-align:center; font: 600 14px/${FH}px var(--cond); color: var(--ivory); letter-spacing: 0; }
+  .flap .top { top:0; height: ${Math.floor(FH / 2)}px; transform-origin: 50% 100%; backface-visibility: hidden; }
+  .flap .top span { top: 0; }
+  .flap .bot { bottom:0; height: ${Math.ceil(FH / 2)}px; border-radius: 0 0 2px 2px; background: linear-gradient(180deg, #1E1E1E 0%, #151515 100%); transform-origin: 50% 0; backface-visibility: hidden; }
+  .flap .bot span { bottom: 0; }
+  .flap .seam { position:absolute; left:0; right:0; top: ${Math.floor(FH / 2)}px; height: 1px; background: #000; z-index: 3; }
+  .flap.f .top { animation: flp-top 75ms ease-in; }
+  .flap.f .bot { animation: flp-bot 75ms ease-out 40ms both; }
+  @keyframes flp-top { from { transform: rotateX(0deg); filter: brightness(1); } to { transform: rotateX(-88deg); filter: brightness(0.5); } }
+  @keyframes flp-bot { from { transform: rotateX(88deg); filter: brightness(0.5); } to { transform: rotateX(0deg); filter: brightness(1); } }
+  @media (prefers-reduced-motion: reduce) { .flap.f .top, .flap.f .bot { animation: none; } }
+  .foot { margin-top:auto; display:flex; justify-content:space-between; align-items:baseline; padding-top: 6px; border-top: 1px solid #1c1c1c; }
+  .foot span { font: 600 8.5px/1 var(--cond); letter-spacing: 2px; text-transform:uppercase; color: #8f8368; }
+  .foot b { color: var(--yellow); font-weight: 700; }
+  .foot .mock { color: #F5B52A; }
 `;
 
-const Row = ({ s }) => {
-  const st = STATUS[s.status] || STATUS.idle;
-  const pct = s.ctx && s.window ? Math.min(100, Math.round((s.ctx / s.window) * 100)) : 0;
-  const parts = [s.project, s.branch, s.model, ago(s.age)].filter(Boolean);
+// One character position. When the target changes it flutters through a few
+// neighbouring drum characters before settling, like the real mechanism.
+const Flap = ({ ch, color }) => {
+  const target = ch || " ";
+  const [cur, setCur] = React.useState(target);
+  const [tick, setTick] = React.useState(0);
+  const timer = React.useRef(null);
+  React.useEffect(() => {
+    if (cur === target) return;
+    clearTimeout(timer.current);
+    const from = DRUM.indexOf(cur), to = DRUM.indexOf(target);
+    const steps = (from < 0 || to < 0) ? 1 : Math.min(6, Math.max(1, ((to - from) + DRUM.length) % DRUM.length));
+    let i = 0;
+    const run = () => {
+      i += 1;
+      const next = i >= steps ? target : DRUM[(from + i) % DRUM.length];
+      setCur(next); setTick((t) => t + 1);
+      if (next !== target) timer.current = setTimeout(run, 78 + Math.random() * 20);
+    };
+    timer.current = setTimeout(run, 20 + Math.random() * 120);
+    return () => clearTimeout(timer.current);
+  }, [target]);
   return (
-    <div className={`row st-${st.slug}`} style={{ "--tint": st.tint }}>
-      <span className="dot" />
-      <div className="main">
-        <div className="title">{s.title}</div>
-        <div className="meta">{parts.join(" · ")}{s.tool && s.status === "running" ? <span> · {s.tool}</span> : null}{s.agent === "codex" ? <span> · codex</span> : null}</div>
-      </div>
-      <div className="ctx" title={s.ctx ? `Context carried into the last turn: ${s.ctx.toLocaleString()} tokens` : "No usage data"}>
-        {s.ctx ? <i><b style={{ width: `${pct}%` }} /></i> : null}
-        {s.ctx ? `${fmtK(s.ctx)} ctx` : "—"}
-      </div>
-      <span className="badge">{st.label}</span>
-    </div>
+    <span className={`flap ${tick ? "f" : ""}`} key={tick}>
+      <span className="half top"><span style={{ color }}>{cur}</span></span>
+      <span className="half bot"><span style={{ color }}>{cur}</span></span>
+      <span className="seam" />
+    </span>
   );
 };
+const Text = ({ text, width, color }) => <span className="cell">{clean(text, width).split("").map((c, i) => <Flap key={i} ch={c} color={color} />)}</span>;
 
-const Fleet = ({ data, staleTs, mock }) => {
-  const t = data.totals || {}; const rows = (data.sessions || []).slice(0, ROWS); const extra = (data.sessions || []).length - rows.length;
+const Clock = () => {
+  const [t, setT] = React.useState(() => hhmm(0));
+  React.useEffect(() => { const id = setInterval(() => setT(hhmm(0)), 5000); return () => clearInterval(id); }, []);
+  return <Text text={t} width={5} color="var(--ivory)" />;
+};
+
+const Board = ({ data, staleTs, mock }) => {
+  const t = data.totals || {}; const rows = (data.sessions || []).slice(0, ROWS);
+  while (rows.length < ROWS) rows.push(null);
   return (
     <div>
       <DragHandle k={KEY} />
       <ResizeHandle k={KEY} />
-      {staleTs ? <Stale ts={staleTs} /> : null}
-      <div className="cap"><span>Agent fleet</span><span><b>{t.running || 0}</b> running · <b>{t.needs || 0}</b> waiting</span></div>
-      <div className="head">{headline(t)}</div>
-      <div className="rows">
-        {rows.length ? rows.map((s) => <Row key={`${s.agent}-${s.id || s.title}`} s={s} />) : <Empty text="No agents in the last 24 hours. Start claude or codex in a terminal and this fills in." />}
-        {extra > 0 ? <div className="more">+{extra} more session{extra > 1 ? "s" : ""}</div> : null}
-      </div>
-      <div className="foot">
-        <span>today <b>{fmtK(t.in || 0)}</b> in · <b>{fmtK(t.out || 0)}</b> out · <b>{t.sessions || 0}</b> sessions</span>
-        <span>{mock ? <span className="mock">sample data</span> : clockStamp(Date.now())}</span>
+      <span className="screw" style={{ top: 5, left: 5 }} /><span className="screw" style={{ top: 5, right: 5 }} /><span className="screw" style={{ bottom: 5, left: 5 }} /><span className="screw" style={{ bottom: 5, right: 5 }} />
+      <div className="board">
+        <div className="hdr"><span className="t">Agent fleet<small>Departures · {t.running || 0} running · {t.needs || 0} waiting</small></span><Clock /></div>
+        <div className="cols">{COLS.map(([n, w]) => <span key={n} style={{ width: w * (FW + GAP) - GAP }}>{n}</span>)}</div>
+        {rows.map((s, i) => {
+          const st = s ? (STATUS[s.status] || STATUS.idle) : null;
+          return (
+            <div className="row" key={s ? `${s.agent}-${s.id}` : `empty-${i}`}>
+              <Text text={s ? hhmm(s.age, data.now) : ""} width={5} color="var(--ivory)" />
+              <Text text={s ? s.agent : ""} width={6} color="var(--ivory)" />
+              <Text text={s ? s.project : ""} width={10} color="var(--ivory)" />
+              <Text text={s ? s.title : ""} width={15} color="var(--ivory)" />
+              <Text text={s ? st.text : ""} width={9} color={s ? st.color : "var(--ivory)"} />
+            </div>
+          );
+        })}
+        <div className="foot">
+          <span>Today <b>{fmtK(t.in || 0)}</b> in · <b>{fmtK(t.out || 0)}</b> out · <b>{t.sessions || 0}</b> sessions</span>
+          <span>{mock ? <span className="mock">Sample data</span> : staleTs ? `Stale · ${clockStamp(staleTs)}` : `Updated ${clockStamp(Date.now())}`}</span>
+        </div>
       </div>
     </div>
   );
@@ -636,6 +662,6 @@ const Fleet = ({ data, staleTs, mock }) => {
 
 export const render = (props) => {
   const r = resolve(KEY, props, parse, MOCK);
-  if (r.loading) return <Skel tint={T.tintGreen} />;
-  return <Fleet data={r.data} staleTs={r.staleTs} mock={r.mock} />;
+  if (r.loading) return <Skel tint={T.tintOrange} />;
+  return <Board data={r.data} staleTs={r.staleTs} mock={r.mock} />;
 };
