@@ -7,10 +7,7 @@
 [Übersicht gallery](https://tracesof.net/uebersicht-widgets/) · [Widget suite](https://github.com/jke48222/widget-suite) · [Download](https://github.com/jke48222/agent-fleet-widget/releases/latest) · [Setup guide](docs/SETUP.md) · [Troubleshooting](docs/TROUBLESHOOTING.md)
 
 A widget for [Übersicht](http://tracesof.net/uebersicht/), self-contained in
-`index.jsx`. It is a split-flap departures board: a metal bezel, a matte black
-board with yellow column heads, and one row of flaps per session that flutter
-through the drum when a value changes, the way a Solari board does. It reads
-the session logs that Claude Code and Codex already write
+`index.jsx`. It reads the session logs that Claude Code and Codex already write
 (`~/.claude/projects`, `~/.codex/sessions`) and shows each session's title,
 project, branch, model, last tool call, the context it carried into its last
 turn, and a status: **running**, **needs you**, **paused**, or **idle**. The
@@ -72,7 +69,6 @@ the first prompt.
 ## Bundled files
 
 - `agent-fleet.widget/index.jsx` — the widget, helper embedded
-- `agent-fleet.widget/fonts/` — Barlow Condensed, SIL Open Font License, see `fonts/OFL.txt`
 - `setup/fleet.py` — the same helper as a file, for reading and testing
 - `install.sh` / `install.command` — one-click installer (copies the widget into Übersicht and installs any helpers)
 - `check.sh` — read-only setup diagnostics; prints pass/fail per item
